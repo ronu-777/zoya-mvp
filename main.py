@@ -21,7 +21,7 @@ if not GROQ_API_KEY:
     raise ValueError("❌ GROQ_API_KEY is not set. Check your Railway variables.")
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama3-70b-8192"
+GROQ_MODEL = "llama-3.3-70b-versatile"
 
 # ─── System Prompt ─────────────────────────────────────────
 SYSTEM_PROMPT = """You are Zoya.
@@ -259,4 +259,5 @@ async def close(interaction: discord.Interaction):
 
 # ─── Run ───────────────────────────────────────────────────
 bot.run(DISCORD_TOKEN)
+
 
