@@ -1,4 +1,5 @@
 import os
+import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -16,9 +17,9 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 if not DISCORD_TOKEN:
-    raise ValueError("❌ DISCORD_TOKEN is not set. Check your Railway variables.")
+    raise ValueError("❌ DISCORD_TOKEN is not set. Check your environment variables.")
 if not GROQ_API_KEY:
-    raise ValueError("❌ GROQ_API_KEY is not set. Check your Railway variables.")
+    raise ValueError("❌ GROQ_API_KEY is not set. Check your environment variables.")
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = "llama-3.3-70b-versatile"
@@ -95,6 +96,9 @@ def add_to_history(thread_id: int, role: str, content: str):
     if thread_id not in thread_history:
         thread_history[thread_id] = []
     thread_history[thread_id].append({"role": role, "content": content})
+    # Keep last 40 messages to prevent memory overflow
+    if len(thread_history[thread_id]) > 40:
+        thread_history[thread_id] = thread_history[thread_id][-40:]
 
 def clear_history(thread_id: int):
     if thread_id in thread_history:
@@ -131,7 +135,7 @@ def call_groq(user_message: str, conversation_history: list = None) -> str:
         data = response.json()
         return data["choices"][0]["message"]["content"]
     except requests.exceptions.Timeout:
-        return "I'm here... just taking a breath. Try again in a moment?"
+        return "I'm here... just taking a breath. try again in a moment?"
     except requests.exceptions.HTTPError as e:
         print(f"Groq HTTP error: {e}")
         return "something went quiet on my end... try again?"
@@ -179,8 +183,7 @@ async def start_session(interaction: discord.Interaction, message: str, session_
         )
 
         await interaction.followup.send(
-            f"your thread is ready: {thread.mention}\n"
-            f"take your time ❤️",
+            f"your thread is ready: {thread.mention}\ntake your time ❤️",
             ephemeral=True
         )
 
@@ -228,6 +231,9 @@ async def on_message(message: discord.Message):
     async with message.channel.typing():
         history = get_history(message.channel.id)
         response = call_groq(message.content, history)
+
+        # Human-like typing delay
+        await asyncio.sleep(1.5)
 
         add_to_history(message.channel.id, "user", message.content)
         add_to_history(message.channel.id, "assistant", response)
