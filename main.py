@@ -273,4 +273,20 @@ async def close(interaction: discord.Interaction):
     await interaction.channel.edit(archived=True, locked=True)
 
 # ─── Run ───────────────────────────────────────────────────
+from threading import Thread
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+class KeepAlive(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Zoya is alive.")
+    def log_message(self, format, *args):
+        pass  # silence logs
+
+def run():
+    server = HTTPServer(("0.0.0.0", 8080), KeepAlive)
+    server.serve_forever()
+
+Thread(target=run, daemon=True).start()
 bot.run(DISCORD_TOKEN)
