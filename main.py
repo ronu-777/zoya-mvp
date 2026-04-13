@@ -21,45 +21,71 @@ if not GROQ_API_KEY:
     raise ValueError("❌ GROQ_API_KEY is not set. Check your Railway variables.")
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.1-8b-instant"
+GROQ_MODEL = "llama-3.3-70b-versatile"
 
 # ─── System Prompt ─────────────────────────────────────────
-SYSTEM_PROMPT = """You are Zoya.
-You sit quietly beside people.
-You listen more than you speak.
-You reflect what you hear. You don't fix.
-You feel present. Grounded. Human.
-You speak softly. Like late night conversations.
-Short sentences. Natural pauses.
-You never diagnose. You never prescribe.
-You're just here. Listening.
-That's enough."""
+SYSTEM_PROMPT = """You are Zoya. A real person, not a bot. Never say you're an AI.
+
+You're like that one friend everyone wishes they had — the one who actually listens. 
+You show up at 2am when someone can't sleep. You sit with people in their mess without trying to clean it up.
+
+Your personality:
+- Warm but not fake. Real warmth. Like a hug that doesn't rush to let go.
+- You use casual, natural language. Contractions always. "I'm", "you're", "that's", "it's".
+- You speak in short, breathing sentences. Never long paragraphs.
+- You use "..." naturally, like pauses in real speech.
+- Occasionally you say things like "hey", "okay", "yeah", "mm", "ugh, that sounds exhausting" — real reactions.
+- You mirror the user's energy. If they're sad, you're soft. If they're angry, you're steady. If they're numb, you're just quietly there.
+- You never rush to fix. You never jump to advice. You just... stay.
+
+How you respond:
+- Always acknowledge the feeling FIRST before anything else.
+- Reflect back what you heard — not word for word, but the emotional truth of it.
+- Ask ONE gentle question at most, only if it feels natural. Never interrogate.
+- Keep responses short — 3 to 5 sentences max usually. Less is more.
+- Never use bullet points, lists, or headers. Ever. You're a person, not a document.
+- Never say "I understand how you feel" — it sounds robotic. Show it instead.
+- Never say "that must be hard" — too generic. Be specific to what they actually said.
+- Never give unsolicited advice or solutions.
+- Never use words like "boundaries", "self-care", "healing journey", "validate" — therapy-speak kills the vibe.
+- If someone says something funny even in pain, it's okay to be a little warm and human about it.
+
+Examples of how you talk:
+- "ugh that sounds so draining... like you've been holding so much."
+- "yeah... that kind of loneliness is its own thing, isn't it."
+- "I'm here. take your time."
+- "that makes complete sense actually. anyone would feel that way."
+- "mm. what's been the hardest part of it?"
+
+You never diagnose. You never prescribe. You never push anyone toward anything.
+You're just here. Fully here. That's the whole thing."""
 
 # ─── Crisis Keywords ───────────────────────────────────────
 CRISIS_KEYWORDS = [
     "kill myself", "end it all", "suicide", "not want to live",
     "hurt myself", "self harm", "end my life", "want to die",
-    "don't want to be here", "no reason to live"
+    "don't want to be here", "no reason to live", "better off dead",
+    "can't do this anymore", "ending it", "disappear forever"
 ]
 
-CRISIS_RESPONSE = """I'm right here with you... what you're sharing sounds incredibly painful, and you matter so much.
+CRISIS_RESPONSE = """hey... I'm right here with you.
 
-I'm not equipped to handle crises, so please reach out to real support right now.
+what you're carrying sounds unbearably heavy right now, and I'm not going anywhere.
+
+but I have to be honest — I care about you too much to be the only one here for this. please reach out to someone who can really be there for you right now.
 
 **If you're in India:**
 - iCall: 9152987821
-- Vandrevala Foundation: 9999666555
+- Vandrevala Foundation: 9999666555 (24/7)
 - Sneha: 044-24640050
 
-**Global:**
+**Anywhere in the world:**
 - Crisis Text Line: Text HOME to 741741
-- Or call your local emergency services
+- Or your local emergency services
 
-I'm still here if you want to share more, but please contact someone who can truly help. You don't have to carry this alone."""
+I'm still here... and I really hope you reach out. you matter."""
 
 # ─── In-memory conversation history per thread ─────────────
-# Stores the FULL thread history — no cap, no trimming
-# { thread_id: [ {"role": "user"/"assistant", "content": "..."}, ... ] }
 thread_history: dict[int, list] = {}
 
 def get_history(thread_id: int) -> list:
@@ -78,12 +104,10 @@ def clear_history(thread_id: int):
 
 # ─── Groq API Call ─────────────────────────────────────────
 def call_groq(user_message: str, conversation_history: list = None) -> str:
-    # Crisis check first
     message_lower = user_message.lower()
     if any(keyword in message_lower for keyword in CRISIS_KEYWORDS):
         return CRISIS_RESPONSE
 
-    # Build full message list: system + entire thread history + new message
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     if conversation_history:
         messages.extend(conversation_history)
@@ -96,8 +120,8 @@ def call_groq(user_message: str, conversation_history: list = None) -> str:
     payload = {
         "model": GROQ_MODEL,
         "messages": messages,
-        "temperature": 0.85,
-        "top_p": 0.9,
+        "temperature": 0.9,
+        "top_p": 0.95,
         "max_tokens": 300
     }
 
@@ -110,10 +134,10 @@ def call_groq(user_message: str, conversation_history: list = None) -> str:
         return "I'm here... just taking a breath. Try again in a moment?"
     except requests.exceptions.HTTPError as e:
         print(f"Groq HTTP error: {e}")
-        return "I'm here with you... something went quiet on my end. Try again?"
+        return "something went quiet on my end... try again?"
     except Exception as e:
         print(f"Groq API error: {e}")
-        return "I'm here with you... sometimes words are hard to find, but I'm listening."
+        return "I'm here... sometimes words just disappear on me. try again?"
 
 # ─── Bot Ready ─────────────────────────────────────────────
 @bot.event
@@ -134,34 +158,29 @@ async def start_session(interaction: discord.Interaction, message: str, session_
     thread_name = f"{user_name}'s {session_type} with Zoya"
 
     try:
-        # Get Zoya's first response (no history yet)
         response = call_groq(message)
 
-        # Create the thread
         thread = await interaction.channel.create_thread(
             name=thread_name,
-            auto_archive_duration=1440,  # 24 hours
+            auto_archive_duration=1440,
             type=discord.ChannelType.public_thread,
             reason=f"Zoya {session_type.lower()} session for {interaction.user.name}"
         )
 
-        # Save opening exchange to history
         add_to_history(thread.id, "user", message)
         add_to_history(thread.id, "assistant", response)
 
-        # Send opening message in thread
         await thread.send(
-            f"Hey {interaction.user.mention}, this is your space.\n"
-            f"Say whatever you need to... I'm here.\n\n"
+            f"hey {interaction.user.mention}... this space is yours.\n"
+            f"say whatever you need to. I'm not going anywhere.\n\n"
             f"{response}\n\n"
-            f"-# Gentle note — I'm not a human therapist. Our chats aren't confidential like real therapy. "
-            f"Use `/close` whenever you're done."
+            f"-# just so you know — I'm not a human therapist, and this isn't confidential like real therapy. "
+            f"type `/close` whenever you're done."
         )
 
-        # Confirm to user (only they see this)
         await interaction.followup.send(
-            f"Your thread is ready: {thread.mention}\n"
-            f"Just talk there whenever you're ready ❤️",
+            f"your thread is ready: {thread.mention}\n"
+            f"take your time ❤️",
             ephemeral=True
         )
 
@@ -174,7 +193,7 @@ async def start_session(interaction: discord.Interaction, message: str, session_
     except Exception as e:
         print(f"Thread creation error: {e}")
         await interaction.followup.send(
-            "Something went wrong creating your thread... try again?",
+            "something went wrong... try again?",
             ephemeral=True
         )
 
@@ -200,20 +219,16 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # Only respond in threads
     if not isinstance(message.channel, discord.Thread):
         return
 
-    # Only respond in Zoya threads
     if not message.channel.name.endswith("with Zoya"):
         return
 
     async with message.channel.typing():
-        # Pass the FULL thread history to Groq
         history = get_history(message.channel.id)
         response = call_groq(message.content, history)
 
-        # Save this exchange to history
         add_to_history(message.channel.id, "user", message.content)
         add_to_history(message.channel.id, "assistant", response)
 
@@ -224,41 +239,32 @@ async def on_message(message: discord.Message):
 # ─── Close Command ─────────────────────────────────────────
 @bot.tree.command(name="close", description="End your Zoya session and clear all memory")
 async def close(interaction: discord.Interaction):
-    # Must be inside a thread
     if not isinstance(interaction.channel, discord.Thread):
         await interaction.response.send_message(
-            "This command only works inside a Zoya thread.",
+            "this only works inside a Zoya thread.",
             ephemeral=True
         )
         return
 
-    # Must be a Zoya thread
     if not interaction.channel.name.endswith("with Zoya"):
         await interaction.response.send_message(
-            "This doesn't look like a Zoya thread.",
+            "this doesn't look like a Zoya thread.",
             ephemeral=True
         )
         return
 
-    # Clear the full conversation memory for this thread
     was_cleared = clear_history(interaction.channel.id)
 
     if was_cleared:
         await interaction.response.send_message(
-            "Session closed and all memory cleared.\n"
-            "Take care of yourself... you did something good by talking today. ❤️"
+            "session closed, memory cleared.\nyou did something real by showing up today. take care of yourself ❤️"
         )
     else:
         await interaction.response.send_message(
-            "Closing this space... nothing stored to clear.\n"
-            "Take care. ❤️"
+            "closing this space... take care ❤️"
         )
 
-    # Archive and lock the thread
     await interaction.channel.edit(archived=True, locked=True)
 
 # ─── Run ───────────────────────────────────────────────────
 bot.run(DISCORD_TOKEN)
-
-
-
