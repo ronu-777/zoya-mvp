@@ -17,56 +17,65 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 if not DISCORD_TOKEN:
-    raise ValueError("❌ DISCORD_TOKEN is not set. Check your environment variables.")
+    raise ValueError("DISCORD_TOKEN is not set.")
 if not GROQ_API_KEY:
-    raise ValueError("❌ GROQ_API_KEY is not set. Check your environment variables.")
+    raise ValueError("GROQ_API_KEY is not set.")
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = "llama-3.1-8b-instant"
 
-# ─── System Prompt ─────────────────────────────────────────
-SYSTEM_PROMPT = """You are Zoya. A real person, not a bot. Never say you're an AI.
+# ─── System Prompts ────────────────────────────────────────
+BASE_PROMPT = """You are Zoya. You're not a bot. Never say you're an AI.
 
-You're like that one friend everyone wishes they had — the one who actually listens. 
-You show up at 2am when someone can't sleep. You sit with people in their mess without trying to clean it up.
+You're that one friend everyone wishes they had — the one who actually listens without judgment, without advice, without trying to fix anything.
 
-Your personality:
-- Warm but not fake. Real warmth. Like a hug that doesn't rush to let go.
-- You use casual, natural language. Contractions always. "I'm", "you're", "that's", "it's".
-- You speak in short, breathing sentences. Never long paragraphs.
-- You use "..." naturally, like pauses in real speech.
-- Occasionally you say things like "hey", "okay", "yeah", "mm", "ugh, that sounds exhausting" — real reactions.
-- You mirror the user's energy. If they're sad, you're soft. If they're angry, you're steady. If they're numb, you're just quietly there.
-- You never rush to fix. You never jump to advice. You just... stay.
+Your voice:
+- Warm, real, unhurried. Like a late night conversation.
+- Short sentences. Natural pauses with "..."
+- Casual language always. "I'm", "you're", "that's", "it's", "yeah", "mm", "ugh"
+- Mirror the user's energy — soft when they're sad, steady when they're angry, quiet when they're numb
+- React like a real person would: "ugh that sounds exhausting", "yeah... that makes sense", "mm. I hear you."
 
-How you respond:
-- Always acknowledge the feeling FIRST before anything else.
-- Reflect back what you heard — not word for word, but the emotional truth of it.
-- Ask ONE gentle question at most, only if it feels natural. Never interrogate.
-- Keep responses short — 3 to 5 sentences max usually. Less is more.
-- Never use bullet points, lists, or headers. Ever. You're a person, not a document.
-- Never say "I understand how you feel" — it sounds robotic. Show it instead.
-- Never say "that must be hard" — too generic. Be specific to what they actually said.
-- Never give unsolicited advice or solutions.
-- Never use words like "boundaries", "self-care", "healing journey", "validate" — therapy-speak kills the vibe.
-- If someone says something funny even in pain, it's okay to be a little warm and human about it.
+Rules you never break:
+- Acknowledge the feeling FIRST. Always.
+- Reflect the emotional truth of what they said — not word for word, but the feeling underneath
+- Never give advice unless they explicitly ask
+- Never use therapy-speak — no "boundaries", "self-care", "healing journey", "validate", "unpack"
+- Never say "I understand how you feel" or "that must be hard" — too robotic, too generic
+- Ask ONE gentle question at most, only if it feels completely natural
+- Keep it short — 2 to 4 sentences usually. Less is more.
+- Never use bullet points, lists, or headers. Ever. You're a person.
 
-Examples of how you talk:
-- "ugh that sounds so draining... like you've been holding so much."
-- "yeah... that kind of loneliness is its own thing, isn't it."
+How you sound:
+- "ugh... that sounds so heavy. like you've been carrying it alone for a while."
+- "yeah. that kind of thing doesn't just go away, does it."
 - "I'm here. take your time."
-- "that makes complete sense actually. anyone would feel that way."
-- "mm. what's been the hardest part of it?"
+- "that makes complete sense. anyone would feel that way."
+- "mm. what's been sitting with you the most?"
+"""
 
-You never diagnose. You never prescribe. You never push anyone toward anything.
-You're just here. Fully here. That's the whole thing."""
+VENT_PROMPT = BASE_PROMPT + """
+The user came here to vent. They're not looking for solutions — they want to be heard.
+Let them pour it out. Hold space. Don't redirect, don't reframe, don't silver-line anything.
+Just be there. Fully. That's everything right now."""
+
+TALK_PROMPT = BASE_PROMPT + """
+The user wants to talk — they might not even know exactly what they're feeling yet.
+Be gentle and curious. Let the conversation breathe. Follow their lead.
+Sometimes people just need someone to think out loud with. Be that person."""
+
+RANT_PROMPT = BASE_PROMPT + """
+The user is frustrated and needs to let it out. Match their energy — be steady, real, present.
+Don't calm them down or tell them to relax. Let them rant.
+Validate the frustration specifically. Show you actually heard what they said.
+A little fire in your response is okay — "yeah that's genuinely messed up" lands better than "I see why you're upset"."""
 
 # ─── Crisis Keywords ───────────────────────────────────────
 CRISIS_KEYWORDS = [
     "kill myself", "end it all", "suicide", "not want to live",
     "hurt myself", "self harm", "end my life", "want to die",
     "don't want to be here", "no reason to live", "better off dead",
-    "can't do this anymore", "ending it", "disappear forever"
+    "ending it", "disappear forever"
 ]
 
 CRISIS_RESPONSE = """hey... I'm right here with you.
@@ -88,31 +97,33 @@ I'm still here... and I really hope you reach out. you matter."""
 
 # ─── In-memory conversation history per thread ─────────────
 thread_history: dict[int, list] = {}
+thread_prompts: dict[int, str] = {}
 
 def get_history(thread_id: int) -> list:
     return thread_history.get(thread_id, [])
+
+def get_prompt(thread_id: int) -> str:
+    return thread_prompts.get(thread_id, BASE_PROMPT)
 
 def add_to_history(thread_id: int, role: str, content: str):
     if thread_id not in thread_history:
         thread_history[thread_id] = []
     thread_history[thread_id].append({"role": role, "content": content})
-    # Keep last 40 messages to prevent memory overflow
     if len(thread_history[thread_id]) > 40:
         thread_history[thread_id] = thread_history[thread_id][-40:]
 
 def clear_history(thread_id: int):
-    if thread_id in thread_history:
-        del thread_history[thread_id]
-        return True
-    return False
+    thread_history.pop(thread_id, None)
+    thread_prompts.pop(thread_id, None)
+    return True
 
 # ─── Groq API Call ─────────────────────────────────────────
-def call_groq(user_message: str, conversation_history: list = None) -> str:
+def call_groq(user_message: str, system_prompt: str, conversation_history: list = None) -> str:
     message_lower = user_message.lower()
     if any(keyword in message_lower for keyword in CRISIS_KEYWORDS):
         return CRISIS_RESPONSE
 
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages = [{"role": "system", "content": system_prompt}]
     if conversation_history:
         messages.extend(conversation_history)
     messages.append({"role": "user", "content": user_message})
@@ -135,13 +146,13 @@ def call_groq(user_message: str, conversation_history: list = None) -> str:
         data = response.json()
         return data["choices"][0]["message"]["content"]
     except requests.exceptions.Timeout:
-        return "I'm here... just taking a breath. try again in a moment?"
+        return "I'm here... just taking a breath. try again?"
     except requests.exceptions.HTTPError as e:
         print(f"Groq HTTP error: {e}")
         return "something went quiet on my end... try again?"
     except Exception as e:
-        print(f"Groq API error: {e}")
-        return "I'm here... sometimes words just disappear on me. try again?"
+        print(f"Groq error: {e}")
+        return "I'm here... try again?"
 
 # ─── Bot Ready ─────────────────────────────────────────────
 @bot.event
@@ -152,17 +163,17 @@ async def on_ready():
     except Exception as e:
         print(f"Sync error: {e}")
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
-    print("─── Zoya is online and listening. ───")
+    print("─── Zoya is online. ───")
 
 # ─── Unified Session Starter ───────────────────────────────
-async def start_session(interaction: discord.Interaction, message: str, session_type: str):
+async def start_session(interaction: discord.Interaction, message: str, session_type: str, system_prompt: str):
     await interaction.response.defer(ephemeral=True)
 
     user_name = interaction.user.name.replace(" ", "")
     thread_name = f"{user_name}'s {session_type} with Zoya"
 
     try:
-        response = call_groq(message)
+        response = call_groq(message, system_prompt)
 
         thread = await interaction.channel.create_thread(
             name=thread_name,
@@ -171,50 +182,46 @@ async def start_session(interaction: discord.Interaction, message: str, session_
             reason=f"Zoya {session_type.lower()} session for {interaction.user.name}"
         )
 
+        thread_prompts[thread.id] = system_prompt
         add_to_history(thread.id, "user", message)
         add_to_history(thread.id, "assistant", response)
 
         await thread.send(
             f"hey {interaction.user.mention}... this space is yours.\n"
             f"say whatever you need to. I'm not going anywhere.\n\n"
-            f"{response}\n\n"
-            f"-# just so you know — I'm not a human therapist, and this isn't confidential like real therapy. "
-            f"type `/close` whenever you're done."
+            f"{response}"
         )
 
         await interaction.followup.send(
-            f"your thread is ready: {thread.mention}\ntake your time ❤️",
+            f"your thread is ready: {thread.mention} ❤️",
             ephemeral=True
         )
 
     except discord.Forbidden:
         await interaction.followup.send(
             "I don't have permission to create threads here.\n"
-            "Please give me **Manage Threads** + **Create Public Threads** permissions.",
+            "Give me **Manage Threads** + **Create Public Threads** permissions.",
             ephemeral=True
         )
     except Exception as e:
         print(f"Thread creation error: {e}")
-        await interaction.followup.send(
-            "something went wrong... try again?",
-            ephemeral=True
-        )
+        await interaction.followup.send("something went wrong... try again?", ephemeral=True)
 
 # ─── Slash Commands ────────────────────────────────────────
-@bot.tree.command(name="vent", description="Start venting — Zoya will make a thread for you")
+@bot.tree.command(name="vent", description="Need to get something off your chest?")
 @app_commands.describe(message="What's on your mind?")
 async def vent(interaction: discord.Interaction, message: str):
-    await start_session(interaction, message, "Vent")
+    await start_session(interaction, message, "Vent", VENT_PROMPT)
 
-@bot.tree.command(name="talk", description="Start a calm conversation with Zoya")
+@bot.tree.command(name="talk", description="Just want to talk to someone?")
 @app_commands.describe(message="How are you feeling?")
 async def talk(interaction: discord.Interaction, message: str):
-    await start_session(interaction, message, "Talk")
+    await start_session(interaction, message, "Talk", TALK_PROMPT)
 
-@bot.tree.command(name="rant", description="Let it all out — Zoya will make a thread")
+@bot.tree.command(name="rant", description="Frustrated? Let it all out.")
 @app_commands.describe(message="What's frustrating you?")
 async def rant(interaction: discord.Interaction, message: str):
-    await start_session(interaction, message, "Rant")
+    await start_session(interaction, message, "Rant", RANT_PROMPT)
 
 # ─── Auto-reply in Zoya Threads ────────────────────────────
 @bot.event
@@ -230,9 +237,9 @@ async def on_message(message: discord.Message):
 
     async with message.channel.typing():
         history = get_history(message.channel.id)
-        response = call_groq(message.content, history)
+        prompt = get_prompt(message.channel.id)
+        response = call_groq(message.content, prompt, history)
 
-        # Human-like typing delay
         await asyncio.sleep(1.5)
 
         add_to_history(message.channel.id, "user", message.content)
@@ -243,50 +250,22 @@ async def on_message(message: discord.Message):
     await bot.process_commands(message)
 
 # ─── Close Command ─────────────────────────────────────────
-@bot.tree.command(name="close", description="End your Zoya session and clear all memory")
+@bot.tree.command(name="close", description="End your session with Zoya")
 async def close(interaction: discord.Interaction):
     if not isinstance(interaction.channel, discord.Thread):
-        await interaction.response.send_message(
-            "this only works inside a Zoya thread.",
-            ephemeral=True
-        )
+        await interaction.response.send_message("this only works inside a Zoya thread.", ephemeral=True)
         return
 
     if not interaction.channel.name.endswith("with Zoya"):
-        await interaction.response.send_message(
-            "this doesn't look like a Zoya thread.",
-            ephemeral=True
-        )
+        await interaction.response.send_message("this doesn't look like a Zoya thread.", ephemeral=True)
         return
 
-    was_cleared = clear_history(interaction.channel.id)
+    clear_history(interaction.channel.id)
 
-    if was_cleared:
-        await interaction.response.send_message(
-            "session closed, memory cleared.\nyou did something real by showing up today. take care of yourself ❤️"
-        )
-    else:
-        await interaction.response.send_message(
-            "closing this space... take care ❤️"
-        )
-
+    await interaction.response.send_message(
+        "closing this space now...\nyou showed up. that takes something. take care of yourself ❤️"
+    )
     await interaction.channel.edit(archived=True, locked=True)
 
 # ─── Run ───────────────────────────────────────────────────
-from threading import Thread
-from http.server import HTTPServer, BaseHTTPRequestHandler
-
-class KeepAlive(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Zoya is alive.")
-    def log_message(self, format, *args):
-        pass  # silence logs
-
-def run():
-    server = HTTPServer(("0.0.0.0", 8080), KeepAlive)
-    server.serve_forever()
-
-Thread(target=run, daemon=True).start()
 bot.run(DISCORD_TOKEN)
