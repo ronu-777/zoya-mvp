@@ -22,7 +22,7 @@ if not GROQ_API_KEY:
     raise ValueError("GROQ_API_KEY is not set.")
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.1-8b-instant"
+GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 # ─── System Prompts ────────────────────────────────────────
 BASE_PROMPT = """You are Zoya. You're not a bot. Never say you're an AI.
