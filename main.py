@@ -3,7 +3,7 @@ import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
-import requests
+import google.generativeai as genai
 
 # ─── Intents ───────────────────────────────────────────────
 intents = discord.Intents.default()
@@ -21,7 +21,7 @@ if not DISCORD_TOKEN:
 if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY is not set.")
 
-GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+genai.configure(api_key=GEMINI_API_KEY)
 
 # ─── System Prompts ────────────────────────────────────────
 BASE_PROMPT = """You are Zoya. You're not a bot. Never say you're an AI.
@@ -122,34 +122,27 @@ def call_gemini(user_message: str, system_prompt: str, conversation_history: lis
     if any(keyword in message_lower for keyword in CRISIS_KEYWORDS):
         return CRISIS_RESPONSE
 
-    contents = []
-    if conversation_history:
-        for msg in conversation_history:
-            role = "user" if msg["role"] == "user" else "model"
-            contents.append({"role": role, "parts": [{"text": msg["content"]}]})
-    contents.append({"role": "user", "parts": [{"text": user_message}]})
-
-    payload = {
-        "system_instruction": {"parts": [{"text": system_prompt}]},
-        "contents": contents,
-        "generationConfig": {
-            "temperature": 0.9,
-            "topP": 0.95,
-            "maxOutputTokens": 300
-        }
-    }
-
     try:
-        response = requests.post(
-            f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
-            json=payload,
-            timeout=15
+        model = genai.GenerativeModel(
+            model_name="gemini-1.5-flash",
+            system_instruction=system_prompt,
+            generation_config={
+                "temperature": 0.9,
+                "top_p": 0.95,
+                "max_output_tokens": 300
+            }
         )
-        response.raise_for_status()
-        data = response.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"]
-    except requests.exceptions.Timeout:
-        return "I'm here... just taking a breath. try again?"
+
+        history = []
+        if conversation_history:
+            for msg in conversation_history:
+                role = "user" if msg["role"] == "user" else "model"
+                history.append({"role": role, "parts": [msg["content"]]})
+
+        chat = model.start_chat(history=history)
+        response = chat.send_message(user_message)
+        return response.text
+
     except Exception as e:
         print(f"Gemini error: {e}")
         return "I'm here... try again?"
