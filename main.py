@@ -14,15 +14,14 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ─── Config ────────────────────────────────────────────────
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 if not DISCORD_TOKEN:
     raise ValueError("DISCORD_TOKEN is not set.")
-if not GROQ_API_KEY:
-    raise ValueError("GROQ_API_KEY is not set.")
+if not GEMINI_API_KEY:
+    raise ValueError("GEMINI_API_KEY is not set.")
 
-GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
 # ─── System Prompts ────────────────────────────────────────
 BASE_PROMPT = """You are Zoya. You're not a bot. Never say you're an AI.
@@ -117,41 +116,42 @@ def clear_history(thread_id: int):
     thread_prompts.pop(thread_id, None)
     return True
 
-# ─── Groq API Call ─────────────────────────────────────────
-def call_groq(user_message: str, system_prompt: str, conversation_history: list = None) -> str:
+# ─── Gemini API Call ───────────────────────────────────────
+def call_gemini(user_message: str, system_prompt: str, conversation_history: list = None) -> str:
     message_lower = user_message.lower()
     if any(keyword in message_lower for keyword in CRISIS_KEYWORDS):
         return CRISIS_RESPONSE
 
-    messages = [{"role": "system", "content": system_prompt}]
+    contents = []
     if conversation_history:
-        messages.extend(conversation_history)
-    messages.append({"role": "user", "content": user_message})
+        for msg in conversation_history:
+            role = "user" if msg["role"] == "user" else "model"
+            contents.append({"role": role, "parts": [{"text": msg["content"]}]})
+    contents.append({"role": "user", "parts": [{"text": user_message}]})
 
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
     payload = {
-        "model": GROQ_MODEL,
-        "messages": messages,
-        "temperature": 0.9,
-        "top_p": 0.95,
-        "max_tokens": 300
+        "system_instruction": {"parts": [{"text": system_prompt}]},
+        "contents": contents,
+        "generationConfig": {
+            "temperature": 0.9,
+            "topP": 0.95,
+            "maxOutputTokens": 300
+        }
     }
 
     try:
-        response = requests.post(GROQ_API_URL, json=payload, headers=headers, timeout=15)
+        response = requests.post(
+            f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
+            json=payload,
+            timeout=15
+        )
         response.raise_for_status()
         data = response.json()
-        return data["choices"][0]["message"]["content"]
+        return data["candidates"][0]["content"]["parts"][0]["text"]
     except requests.exceptions.Timeout:
         return "I'm here... just taking a breath. try again?"
-    except requests.exceptions.HTTPError as e:
-        print(f"Groq HTTP error: {e}")
-        return "something went quiet on my end... try again?"
     except Exception as e:
-        print(f"Groq error: {e}")
+        print(f"Gemini error: {e}")
         return "I'm here... try again?"
 
 # ─── Bot Ready ─────────────────────────────────────────────
@@ -173,7 +173,7 @@ async def start_session(interaction: discord.Interaction, message: str, session_
     thread_name = f"{user_name}'s {session_type} with Zoya"
 
     try:
-        response = call_groq(message, system_prompt)
+        response = call_gemini(message, system_prompt)
 
         thread = await interaction.channel.create_thread(
             name=thread_name,
@@ -238,7 +238,7 @@ async def on_message(message: discord.Message):
     async with message.channel.typing():
         history = get_history(message.channel.id)
         prompt = get_prompt(message.channel.id)
-        response = call_groq(message.content, prompt, history)
+        response = call_gemini(message.content, prompt, history)
 
         await asyncio.sleep(1.5)
 
