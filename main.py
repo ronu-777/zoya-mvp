@@ -21,7 +21,7 @@ if not DISCORD_TOKEN:
 if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY is not set.")
 
-GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
 
 # ─── System Prompts ────────────────────────────────────────
 BASE_PROMPT = """You are Zoya. You're not a bot. Never say you're an AI.
